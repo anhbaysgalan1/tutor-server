@@ -8,7 +8,7 @@ class PushSalesforceCourseStats
   # `return` after `error!` and to avoid using exceptions which we catch all of)
 
   # shortcuts
-  OSA = OpenStax::Salesforce::Remote::OsAncillary
+  TC = OpenStax::Salesforce::Remote::TutorCourse
   IA = OpenStax::Salesforce::Remote::IndividualAdoption
 
   def self.call(allow_error_email:)
@@ -56,39 +56,39 @@ class PushSalesforceCourseStats
       skip!(message: "No teachers", course: course) if teachers(course).length == 0
 
       attached_record = courses_to_attached_records[course]
-      os_ancillary = attached_record.try(:salesforce_object)
+      os_tutor_course = attached_record.try(:salesforce_object)
 
-      if os_ancillary.nil?
+      if os_tutor_course.nil?
         if attached_record.present?
           # The SF record used to exist but no longer does, so detach the record.
-          log { "OSAncillary #{attached_record.salesforce_id} used to exist for course #{course.id} "
+          log { "TutorCourse #{attached_record.salesforce_id} used to exist for course #{course.id} "
                 "but is no longer in SF.  Tutor will forget about it." }
           attached_record.destroy!
         end
 
-        os_ancillary = find_or_create_os_ancillary(course)
+        os_tutor_course = find_or_create_os_tutor_course(course)
 
-        Salesforce::AttachRecord[record: os_ancillary, to: course]
+        Salesforce::AttachRecord[record: os_tutor_course, to: course]
       end
 
-      push_stats(course, os_ancillary)
+      push_stats(course, os_tutor_course)
     rescue Exception => ee
       error!(exception: ee, course: course)
     end
   end
 
-  def find_or_create_os_ancillary(course)
-    osa = find_os_ancillary_by_course_uuid(course)
-    return osa if osa.present?
+  def find_or_create_os_tutor_course(course)
+    tc = find_os_tutor_course_by_course_uuid(course)
+    return tc if tc.present?
 
     ia = find_or_create_individual_adoption(course)
-    create_os_ancillary(course, ia)
+    create_os_tutor_course(course, ia)
   end
 
-  def find_os_ancillary_by_course_uuid(course)
-    # First, see if an OSA exists for this course.  There can be at most 1 because
+  def find_os_tutor_course_by_course_uuid(course)
+    # First, see if an TC exists for this course.  There can be at most 1 because
     # salesforce requires the UUID field to be unique
-    OSA.where(course_uuid: course.uuid).to_a.first
+    TC.where(course_uuid: course.uuid).to_a.first
   end
 
   def find_or_create_individual_adoption(course)
@@ -137,7 +137,7 @@ class PushSalesforceCourseStats
     end
   end
 
-  def create_os_ancillary(course, individual_adoption)
+  def create_os_tutor_course(course, individual_adoption)
     arguments = {
       individual_adoption_id: individual_adoption.id,
       product: course.is_concept_coach ? "Concept Coach" : "Tutor",
@@ -146,18 +146,18 @@ class PushSalesforceCourseStats
       base_year: base_year_for_course(course)
     }
 
-    OSA.new(arguments).tap do |osa|
-      if !osa.save
-        error!(message: "Could not make new OsAncillary for inputs #{arguments}; " \
-                        "errors: #{osa.errors.full_messages.join(', ')}",
+    TC.new(arguments).tap do |tc|
+      if !tc.save
+        error!(message: "Could not make new Tcncillary for inputs #{arguments}; " \
+                        "errors: #{tc.errors.full_messages.join(', ')}",
                course: course)
       end
 
-      # Values in the OSA that are derived from other places in SF, e.g. `TermYear`,
+      # Values in the TC that are derived from other places in SF, e.g. `TermYear`,
       # cannot be set when creating the record.  Instead of manually setting them
       # here, just reload the object from SF so that we know any derived fields are
       # populated.
-      osa.reload
+      tc.reload
     end
   end
 
@@ -177,73 +177,73 @@ class PushSalesforceCourseStats
     end
   end
 
-  def push_stats(course, os_ancillary)
-    error!(message: 'OS Ancillary nil in `push_stats`', course: course) if os_ancillary.nil?
+  def push_stats(course, os_tutor_course)
+    error!(message: 'TutorCourse nil in `push_stats`', course: course) if os_tutor_course.nil?
 
-    os_ancillary.error = nil
+    os_tutor_course.error = nil
 
     begin
       periods = course.periods.without_deleted
 
-      os_ancillary.course_id = course.id
-      os_ancillary.course_uuid = course.uuid
-      os_ancillary.course_name = course.name
-      os_ancillary.created_at = course.created_at.iso8601
-      os_ancillary.teacher_join_url = UrlGenerator.teach_course_url(course.teach_token)
+      os_tutor_course.course_id = course.id
+      os_tutor_course.course_uuid = course.uuid
+      os_tutor_course.course_name = course.name
+      os_tutor_course.created_at = course.created_at.iso8601
+      os_tutor_course.teacher_join_url = UrlGenerator.teach_course_url(course.teach_token)
 
-      os_ancillary.reset_stats
+      os_tutor_course.reset_stats
 
       students = periods.flat_map do |period|
         period.students.preload({role: {taskings: :task}})
       end
 
       students.each do |student|
-        os_ancillary.num_students += 1
-        os_ancillary.num_students_paid += 1 if student.is_paid
-        os_ancillary.num_students_comped += 1 if student.is_comped
-        os_ancillary.num_students_refunded += 1 if student.first_paid_at.present? && !student.is_paid
-        os_ancillary.num_students_dropped += 1 if student.dropped?
+        os_tutor_course.num_students += 1
+        os_tutor_course.num_students_paid += 1 if student.is_paid
+        os_tutor_course.num_students_comped += 1 if student.is_comped
+        os_tutor_course.num_students_refunded += 1 if student.first_paid_at.present? && !student.is_paid
+        os_tutor_course.num_students_dropped += 1 if student.dropped?
 
         num_steps_completed = student.role.taskings.map{ |tasking|
           tasking.task.completed_steps_count
         }.sum
 
-        os_ancillary.num_students_with_work += 1 if num_steps_completed >= 10
+        os_tutor_course.num_students_with_work += 1 if num_steps_completed >= 10
       end
 
-      os_ancillary.num_teachers = course.teachers.length
-      os_ancillary.num_sections = periods.length
+      os_tutor_course.num_teachers = course.teachers.length
+      os_tutor_course.num_sections = periods.length
 
-      os_ancillary.estimated_enrollment = course.estimated_student_count
+      os_tutor_course.estimated_enrollment = course.estimated_student_count
 
-      os_ancillary.status = OpenStax::Salesforce::Remote::OsAncillary::STATUS_APPROVED
-      os_ancillary.product = course.is_concept_coach ? "Concept Coach" : "Tutor"
+      os_tutor_course.status = TC::STATUS_APPROVED
+      os_tutor_course.product = course.is_concept_coach ? "Concept Coach" : "Tutor"
 
-      os_ancillary.course_start_date = course.term_year.starts_at.to_date.iso8601
-      os_ancillary.term = course.term.capitalize
-      os_ancillary.base_year = base_year_for_course(course)
+      os_tutor_course.course_start_date = course.term_year.starts_at.to_date.iso8601
+      os_tutor_course.term = course.term.capitalize
+      os_tutor_course.base_year = base_year_for_course(course)
 
-      os_ancillary.does_cost = course.does_cost
+      os_tutor_course.does_cost = course.does_cost
 
-      os_ancillary.latest_adoption_decision = course.latest_adoption_decision
-      os_ancillary.campaign_member_id = course.creator_campaign_member_id
+      os_tutor_course.latest_adoption_decision = course.latest_adoption_decision
+      os_tutor_course.campaign_member_id = course.creator_campaign_member_id
     rescue Exception => ee
-      # Add the error to the OSA and `error!` but non fatally so the error can get saved
-      # to the OSA
-      os_ancillary.error = "Unable to update stats: #{ee.message}"
+      # Add the error to the TC and `error!` but non fatally so the error can get saved
+      # to the TC
+      os_tutor_course.error = "Unable to update stats: #{ee.message}"
       error!(message: 'Unable to update stats', exception: ee, course: course, non_fatal: true)
     end
 
     begin
-      return if !os_ancillary.changed?
+      return if !os_tutor_course.changed?
 
-      if os_ancillary.save
+      if os_tutor_course.save
         @num_updates += 1
       else
-        error!(message: os_ancillary.errors.full_messages.join(', '), course: course)
+        error!(message: os_tutor_course.errors.full_messages.join(', '), course: course)
       end
     rescue Exception => ee
-      error!(message: 'OSA save error', exception: ee, course: course)
+      error!(message: 'TC save error', exception: ee, course: course)
     end
   end
 

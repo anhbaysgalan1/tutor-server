@@ -32,13 +32,13 @@ class Admin::CoursesAddSalesforce
   end
 
   def get_salesforce_object_for_id(id)
-    # An OsAncillary
-    get_os_ancillary_for_id(id)
+    # A TutorCourse
+    get_tutor_course_for_id(id)
   end
 
-  def get_os_ancillary_for_id(id)
+  def get_tutor_course_for_id(id)
     begin
-      OpenStax::Salesforce::Remote::OsAncillary.find(id)
+      OpenStax::Salesforce::Remote::TutorCourse.find(id)
     rescue Faraday::ClientError => e
       nil
     end
